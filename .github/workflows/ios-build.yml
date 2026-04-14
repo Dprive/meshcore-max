@@ -1,0 +1,35 @@
+name: Build iOS
+
+# Ce script se lance quand tu fais un "push" sur main ou dev-max
+# Il peut aussi être lancé manuellement depuis GitHub (workflow_dispatch)
+on:
+  push:
+    branches: [ "main", "dev-max" ]
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    name: 🍏 Compilation iOS
+    runs-on: macos-latest # On utilise un Mac dans le cloud !
+
+    steps:
+      - name: 📥 Récupération du code
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Installation de Flutter
+        uses: subosito/flutter-action@v4
+        with:
+          channel: 'stable'
+
+      - name: 📦 Téléchargement des dépendances
+        run: flutter pub get
+
+      - name: 🛠️ Compilation de l'application (sans signature)
+        # --no-codesign est obligatoire car on ne fournit pas (encore) de certificat Apple
+        run: flutter build ios --release --no-codesign
+
+      - name: 📤 Sauvegarde du résultat
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-app-build
+          path: build/ios/iphoneos/Runner.app
