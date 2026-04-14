@@ -25,11 +25,16 @@ jobs:
         run: flutter pub get
 
       - name: 🛠️ Compilation de l'application (sans signature)
-        # --no-codesign est obligatoire car on ne fournit pas (encore) de certificat Apple
         run: flutter build ios --release --no-codesign
+
+      - name: 📦 Création du fichier IPA
+        run: |
+          mkdir -p Payload
+          mv build/ios/iphoneos/Runner.app Payload/
+          zip -r app-release.ipa Payload
 
       - name: 📤 Sauvegarde du résultat
         uses: actions/upload-artifact@v4
         with:
           name: ios-app-build
-          path: build/ios/iphoneos/Runner.app
+          path: app-release.ipa
