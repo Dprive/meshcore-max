@@ -40,6 +40,7 @@ import '../storage/contact_settings_store.dart';
 import '../storage/contact_store.dart';
 import '../storage/message_store.dart';
 import '../storage/unread_store.dart';
+import '../storage/prefs_manager.dart';
 import '../utils/app_logger.dart';
 import '../utils/battery_utils.dart';
 import '../utils/platform_info.dart';
@@ -748,6 +749,85 @@ class MeshCoreConnector extends ChangeNotifier {
     for (int i = 0; i < channelCount; i++) {
       await _loadChannelMessages(i);
     }
+  }
+
+  bool _isTestMode = false;
+  bool get isTestMode => _isTestMode;
+
+  void enableTestMode() {
+    if (_pathHistoryService == null) return;
+    _isTestMode = true;
+    _state = MeshCoreConnectionState.connected;
+    _pathHistoryService!.setTestMode(true);
+    PrefsManager.isTestModeGlobal = true;
+
+    _selfPublicKey = Uint8List.fromList([0xAA, 0xBB, 0xCC, 0xDD]);
+    _selfName = "Test Node (Me)";
+    _deviceId = "TEST-DEVICE-01";
+    _deviceDisplayName = "Simulator Device";
+    _firmwareVerCode = 10;
+    
+    _maxContacts = 200;
+    _contacts.clear();
+    _discoveredContacts.clear();
+
+    final rand = math.Random(12345);
+    final places = [
+      "Bastille", "Montmartre", "Tour Eiffel", "Chatelet", "Marais", "Montparnasse", 
+      "Belleville", "Nation", "Villette", "Opera", "Sorbonne", "Invalides", "Pantin", 
+      "Bobigny", "Montreuil", "Vincennes", "Bercy", "St Denis", "Odeon", "Austerlitz"
+    ];
+
+    for (int i = 0; i < 80; i++) {
+      final pk = Uint8List(32);
+      for (int j = 0; j < 32; j++) {
+        pk[j] = rand.nextInt(256);
+      }
+      pk[0] = i; 
+      
+      final lat = 48.8566 + (rand.nextDouble() - 0.5) * 0.15;
+      final lon = 2.3522 + (rand.nextDouble() - 0.5) * 0.2;
+      
+      final isRepeater = i < 30; // 30 repeaters
+      final name = isRepeater 
+          ? "Relais ${places[i % places.length]} ${i ~/ places.length > 0 ? (i ~/ places.length)+1 : ''}".trim()
+          : "Compagnon ${rand.nextInt(900) + 100}";
+          
+      final c = Contact(
+        publicKey: pk,
+        name: name,
+        type: isRepeater ? advTypeRepeater : advTypeChat,
+        lastSeen: DateTime.fromMillisecondsSinceEpoch(DateTime.now().millisecondsSinceEpoch - rand.nextInt(3600000)),
+        pathLength: 0,
+        path: Uint8List(0),
+        latitude: lat,
+        longitude: lon,
+      );
+      _contacts.add(c);
+
+      // Create rich meshed paths
+      if (i > 0) {
+        // Between 1 and 7 hops
+        final hopCount = 1 + rand.nextInt(5);
+        final pathBytes = <int>[];
+        for (int h = 0; h < hopCount; h++) {
+          pathBytes.add(rand.nextInt(30)); // Only rely on repeaters (indexes 0..29) as hops
+        }
+        
+        _pathHistoryService!.handlePathUpdated(
+           c.copyWith(pathLength: hopCount, path: Uint8List.fromList(pathBytes))
+        );
+        _pathHistoryService!.recordPathResult(
+           c.publicKeyHex, 
+           PathSelection(pathBytes: pathBytes, hopCount: hopCount, useFlood: false),
+           success: true,
+           tripTimeMs: 200 + rand.nextInt(1500)
+        );
+      }
+    }
+
+    _appDebugLogService?.info('Test simulator enabled map/topology overrides', tag: 'TestMode');
+    notifyListeners();
   }
 
   void initialize({

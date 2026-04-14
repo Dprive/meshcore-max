@@ -1305,6 +1305,12 @@ class AppLocalizationsFr extends AppLocalizations {
   String get chat_me => 'Moi';
 
   @override
+  String get map_manualNodeEntryHint => 'Entrez l\'indicatif ou le préfixe hex';
+
+  @override
+  String get map_addNode => 'Ajouter le nœud';
+
+  @override
   String get emojiCategorySmileys => 'Émojis';
 
   @override

@@ -10,6 +10,7 @@ class PrefsManager {
   PrefsManager._();
 
   static SharedPreferences? _instance;
+  static bool isTestModeGlobal = false;
 
   /// Initialize the cached instance. Call this once during app startup in main().
   static Future<void> initialize() async {

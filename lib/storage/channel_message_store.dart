@@ -27,6 +27,7 @@ class ChannelMessageStore {
       );
       return;
     }
+    if (PrefsManager.isTestModeGlobal) return;
     final prefs = PrefsManager.instance;
     final key = '$keyFor$channelIndex';
 

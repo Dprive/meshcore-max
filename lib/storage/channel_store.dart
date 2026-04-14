@@ -55,6 +55,7 @@ class ChannelStore {
       appLogger.warn('Public key hex is not set. Cannot save channels.');
       return;
     }
+    if (PrefsManager.isTestModeGlobal) return;
     final prefs = PrefsManager.instance;
     final jsonList = channels.map(_toJson).toList();
     await prefs.setString(keyFor, jsonEncode(jsonList));

@@ -670,6 +670,8 @@
   "chat_reply": "Reply",
   "chat_addReaction": "Add Reaction",
   "chat_me": "Me",
+  "map_manualNodeEntryHint": "Enter callsign or hex prefix",
+  "map_addNode": "Add node",
   "emojiCategorySmileys": "Smileys",
   "emojiCategoryGestures": "Gestures",
   "emojiCategoryHearts": "Hearts",

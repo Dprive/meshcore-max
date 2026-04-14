@@ -23,6 +23,7 @@ class MessageStore {
       appLogger.warn('Public key hex is not set. Cannot save messages.');
       return;
     }
+    if (PrefsManager.isTestModeGlobal) return;
     final prefs = PrefsManager.instance;
     final key = '$keyFor$contactKeyHex';
     final jsonList = messages.map(_messageToJson).toList();

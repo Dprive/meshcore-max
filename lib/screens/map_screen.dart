@@ -561,7 +561,7 @@ class _MapScreenState extends State<MapScreen> {
                     sharedMarkers.length,
                     guessedLocations.length,
                   ),
-                if (_isBuildingPathTrace) _buildPathTraceOverlay(),
+                if (_isBuildingPathTrace) _buildPathTraceOverlay(connector),
               ],
             ),
             bottomNavigationBar: SafeArea(
@@ -917,60 +917,95 @@ class _MapScreenState extends State<MapScreen> {
   }) {
     final markers = <Marker>[];
     final filteredContacts = _filterContactsBySettings(contacts, settings);
+    
+    // Group markers by their exact location to handle superposition
+    final groups = <String, List<Contact>>{};
     for (final contact in filteredContacts) {
-      final marker = Marker(
-        point: LatLng(contact.latitude!, contact.longitude!),
-        width: 35,
-        height: 35,
-        child: GestureDetector(
-          onLongPress: () =>
-              _isBuildingPathTrace ? _showNodeInfo(context, contact) : null,
-          onTap: () => _isBuildingPathTrace
-              ? _addToPath(context, contact)
-              : _showNodeInfo(context, contact),
-          child: Column(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(4),
-                decoration: BoxDecoration(
-                  color: settings.mapShowOverlaps && !_isBuildingPathTrace
-                      ? Colors.red
-                      : _getNodeColor(contact.type),
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 2),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.3),
-                      blurRadius: 4,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: Icon(
-                  _getNodeIcon(contact.type),
-                  color: Colors.white,
-                  size: 20,
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
+      if (!contact.hasLocation) continue;
+      final key = "${contact.latitude!.toStringAsFixed(6)},${contact.longitude!.toStringAsFixed(6)}";
+      groups.putIfAbsent(key, () => []).add(contact);
+    }
 
-      markers.add(marker);
-      if (showLabels) {
-        markers.add(
-          _buildNodeLabelMarker(
-            point: LatLng(contact.latitude!, contact.longitude!),
-            label: settings.mapShowOverlaps && !_isBuildingPathTrace
-                ? "${contact.publicKeyHex.substring(0, 2)}:${contact.name}"
-                : contact.name,
+    for (final group in groups.values) {
+      final bool needsOffset = group.length > 1;
+      
+      for (int i = 0; i < group.length; i++) {
+        final contact = group[i];
+        LatLng point = LatLng(contact.latitude!, contact.longitude!);
+        
+        if (needsOffset) {
+          point = _applyMarkerOffset(point, i, group.length);
+        }
+
+        final marker = Marker(
+          point: point,
+          width: 35,
+          height: 35,
+          child: GestureDetector(
+            onLongPress: () =>
+                _isBuildingPathTrace ? _showNodeInfo(context, contact) : null,
+            onTap: () => _isBuildingPathTrace
+                ? _addToPath(context, contact, position: point)
+                : _showNodeInfo(context, contact),
+            child: Column(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: settings.mapShowOverlaps && !_isBuildingPathTrace
+                        ? Colors.red
+                        : _getNodeColor(contact.type),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 2),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.3),
+                        blurRadius: 4,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Icon(
+                    _getNodeIcon(contact.type),
+                    color: Colors.white,
+                    size: 20,
+                  ),
+                ),
+              ],
+            ),
           ),
         );
+
+        markers.add(marker);
+        if (showLabels) {
+          markers.add(
+            _buildNodeLabelMarker(
+              point: point,
+              label: settings.mapShowOverlaps && !_isBuildingPathTrace
+                  ? "${contact.publicKeyHex.substring(0, 2)}:${contact.name}"
+                  : contact.name,
+            ),
+          );
+        }
       }
     }
 
     return markers;
+  }
+
+  LatLng _applyMarkerOffset(LatLng original, int index, int total) {
+    // Spread markers in a small circle (8 meters radius)
+    const double radiusMeters = 8.0; 
+    final angle = (2 * pi * index) / total;
+    
+    final latOffsetDeg = (radiusMeters / 111320.0) * cos(angle);
+    final lonScale = max(cos(original.latitude * pi / 180.0).abs(), 0.2);
+    final lonOffsetDeg = (radiusMeters / (111320.0 * lonScale)) * sin(angle);
+    
+    return LatLng(
+      original.latitude + latOffsetDeg,
+      original.longitude + lonOffsetDeg,
+    );
   }
 
   Marker _buildNodeLabelMarker({required LatLng point, required String label}) {
@@ -2141,14 +2176,18 @@ class _MapScreenState extends State<MapScreen> {
     setState(() {
       _pathTrace.add(
         contact.publicKey[0],
-      ); // Add first 16 bytes of public key to path trace
+      ); // Add first byte of public key to path trace
       _pathTraceContacts.add(
         contact.copyWith(
           latitude: position?.latitude ?? contact.latitude,
           longitude: position?.longitude ?? contact.longitude,
         ),
       ); // Add contact to path trace contacts
-      _points.add(position ?? LatLng(contact.latitude!, contact.longitude!));
+      if (position != null) {
+        _points.add(position);
+      } else if (contact.hasLocation) {
+        _points.add(LatLng(contact.latitude!, contact.longitude!));
+      }
     });
   }
 
@@ -2172,7 +2211,7 @@ class _MapScreenState extends State<MapScreen> {
     });
   }
 
-  Widget _buildPathTraceOverlay() {
+  Widget _buildPathTraceOverlay(MeshCoreConnector connector) {
     final l10n = context.l10n;
     final isImperial =
         context.read<AppSettingsService>().settings.unitSystem ==
@@ -2205,6 +2244,62 @@ class _MapScreenState extends State<MapScreen> {
                     .map((b) => b.toRadixString(16).padLeft(2, '0'))
                     .join(','),
                 style: TextStyle(fontSize: 18),
+              ),
+              const SizedBox(height: 8),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                child: Autocomplete<Contact>(
+                  displayStringForOption: (contact) => contact.name,
+                  optionsBuilder: (TextEditingValue textEditingValue) {
+                    if (textEditingValue.text.isEmpty) {
+                      return const Iterable<Contact>.empty();
+                    }
+                    return connector.allContacts.where((contact) {
+                      return matchesContactQuery(contact, textEditingValue.text);
+                    }).take(10);
+                  },
+                  onSelected: (contact) {
+                    _addToPath(context, contact);
+                  },
+                  fieldViewBuilder:
+                      (context, controller, focusNode, onFieldSubmitted) {
+                    return TextField(
+                      controller: controller,
+                      focusNode: focusNode,
+                      decoration: InputDecoration(
+                        hintText: l10n.map_manualNodeEntryHint,
+                        isDense: true,
+                        suffixIcon: IconButton(
+                          icon: const Icon(Icons.add),
+                          onPressed: () {
+                            final query = controller.text.trim();
+                            if (query.isEmpty) return;
+                            final match = connector.allContacts
+                                .where((c) => matchesContactQuery(c, query))
+                                .firstOrNull;
+                            if (match != null) {
+                              _addToPath(context, match);
+                              controller.clear();
+                              focusNode.unfocus();
+                            }
+                          },
+                        ),
+                      ),
+                      onSubmitted: (value) {
+                        final query = value.trim();
+                        if (query.isEmpty) return;
+                        final match = connector.allContacts
+                            .where((c) => matchesContactQuery(c, query))
+                            .firstOrNull;
+                        if (match != null) {
+                          _addToPath(context, match);
+                          controller.clear();
+                          focusNode.unfocus();
+                        }
+                      },
+                    );
+                  },
+                ),
               ),
               // const SizedBox(height: 6),
               Wrap(

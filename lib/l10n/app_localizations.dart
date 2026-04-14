@@ -2398,6 +2398,18 @@ abstract class AppLocalizations {
   /// **'Me'**
   String get chat_me;
 
+  /// No description provided for @map_manualNodeEntryHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter callsign or hex prefix'**
+  String get map_manualNodeEntryHint;
+
+  /// No description provided for @map_addNode.
+  ///
+  /// In en, this message translates to:
+  /// **'Add node'**
+  String get map_addNode;
+
   /// No description provided for @emojiCategorySmileys.
   ///
   /// In en, this message translates to:

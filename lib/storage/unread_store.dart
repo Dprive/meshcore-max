@@ -65,6 +65,7 @@ class UnreadStore {
       appLogger.warn('Public key hex is not set. Cannot save unread counts.');
       return;
     }
+    if (PrefsManager.isTestModeGlobal) return;
     _pendingContactUnreadCount = counts;
 
     _contactUnreadSaveTimer?.cancel();

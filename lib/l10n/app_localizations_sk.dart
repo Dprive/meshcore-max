@@ -1288,6 +1288,12 @@ class AppLocalizationsSk extends AppLocalizations {
   String get chat_me => 'Mne';
 
   @override
+  String get map_manualNodeEntryHint => 'Enter callsign or hex prefix';
+
+  @override
+  String get map_addNode => 'Add node';
+
+  @override
   String get emojiCategorySmileys => 'Emoji';
 
   @override

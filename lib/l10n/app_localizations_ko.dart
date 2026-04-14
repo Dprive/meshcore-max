@@ -1236,6 +1236,12 @@ class AppLocalizationsKo extends AppLocalizations {
   String get chat_me => '나';
 
   @override
+  String get map_manualNodeEntryHint => 'Enter callsign or hex prefix';
+
+  @override
+  String get map_addNode => 'Add node';
+
+  @override
   String get emojiCategorySmileys => '이모티콘';
 
   @override

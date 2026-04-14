@@ -1,14 +1,20 @@
 {
   "bg": [
-    "chat_sendMessage"
+    "chat_sendMessage",
+    "map_manualNodeEntryHint",
+    "map_addNode"
   ],
 
   "de": [
-    "chat_sendMessage"
+    "chat_sendMessage",
+    "map_manualNodeEntryHint",
+    "map_addNode"
   ],
 
   "es": [
-    "chat_sendMessage"
+    "chat_sendMessage",
+    "map_manualNodeEntryHint",
+    "map_addNode"
   ],
 
   "fr": [
@@ -16,54 +22,80 @@
   ],
 
   "hu": [
-    "chat_sendMessage"
+    "chat_sendMessage",
+    "map_manualNodeEntryHint",
+    "map_addNode"
   ],
 
   "it": [
-    "chat_sendMessage"
+    "chat_sendMessage",
+    "map_manualNodeEntryHint",
+    "map_addNode"
   ],
 
   "ja": [
-    "chat_sendMessage"
+    "chat_sendMessage",
+    "map_manualNodeEntryHint",
+    "map_addNode"
   ],
 
   "ko": [
-    "chat_sendMessage"
+    "chat_sendMessage",
+    "map_manualNodeEntryHint",
+    "map_addNode"
   ],
 
   "nl": [
-    "chat_sendMessage"
+    "chat_sendMessage",
+    "map_manualNodeEntryHint",
+    "map_addNode"
   ],
 
   "pl": [
-    "chat_sendMessage"
+    "chat_sendMessage",
+    "map_manualNodeEntryHint",
+    "map_addNode"
   ],
 
   "pt": [
-    "chat_sendMessage"
+    "chat_sendMessage",
+    "map_manualNodeEntryHint",
+    "map_addNode"
   ],
 
   "ru": [
-    "chat_sendMessage"
+    "chat_sendMessage",
+    "map_manualNodeEntryHint",
+    "map_addNode"
   ],
 
   "sk": [
-    "chat_sendMessage"
+    "chat_sendMessage",
+    "map_manualNodeEntryHint",
+    "map_addNode"
   ],
 
   "sl": [
-    "chat_sendMessage"
+    "chat_sendMessage",
+    "map_manualNodeEntryHint",
+    "map_addNode"
   ],
 
   "sv": [
-    "chat_sendMessage"
+    "chat_sendMessage",
+    "map_manualNodeEntryHint",
+    "map_addNode"
   ],
 
   "uk": [
-    "chat_sendMessage"
+    "chat_sendMessage",
+    "map_manualNodeEntryHint",
+    "map_addNode"
   ],
 
   "zh": [
-    "chat_sendMessage"
+    "chat_sendMessage",
+    "map_manualNodeEntryHint",
+    "map_addNode"
   ]
 }

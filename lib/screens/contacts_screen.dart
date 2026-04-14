@@ -33,6 +33,7 @@ import 'discovery_screen.dart';
 import 'map_screen.dart';
 import 'repeater_hub_screen.dart';
 import 'settings_screen.dart';
+import 'topology_screen.dart';
 
 enum RoomLoginDestination { chat, management }
 
@@ -401,6 +402,21 @@ class _ContactsScreenState extends State<ContactsScreen>
                     context,
                     MaterialPageRoute(
                       builder: (context) => const DiscoveryScreen(),
+                    ),
+                  ),
+                ),
+                PopupMenuItem(
+                  child: Row(
+                    children: [
+                      const Icon(Icons.hub),
+                      const SizedBox(width: 8),
+                      const Text("Topology & Routing"),
+                    ],
+                  ),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const TopologyScreen(),
                     ),
                   ),
                 ),

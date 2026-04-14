@@ -20,6 +20,12 @@ class PathHistoryService extends ChangeNotifier {
 
   int _version = 0;
   int get version => _version;
+  bool _isTestMode = false;
+  
+  void setTestMode(bool testModeEnabled) {
+    _isTestMode = testModeEnabled;
+    clearAllHistories();
+  }
 
   PathHistoryService(this._storage);
 
@@ -354,7 +360,9 @@ class PathHistoryService extends ChangeNotifier {
     _cache[contactPubKeyHex] = updatedHistory;
     _trackAccess(contactPubKeyHex);
     _evictIfNeeded();
-    _storage.savePathHistory(contactPubKeyHex, updatedHistory);
+    if (!_isTestMode) {
+      _storage.savePathHistory(contactPubKeyHex, updatedHistory);
+    }
 
     notifyListeners();
   }
@@ -382,6 +390,7 @@ class PathHistoryService extends ChangeNotifier {
   Future<ContactPathHistory?> _loadHistoryFromStorage(
     String contactPubKeyHex,
   ) async {
+    if (_isTestMode) return null;
     return await _storage.loadPathHistory(contactPubKeyHex);
   }
 
@@ -443,7 +452,9 @@ class PathHistoryService extends ChangeNotifier {
       recentPaths: updatedPaths,
     );
 
-    await _storage.savePathHistory(contactPubKeyHex, _cache[contactPubKeyHex]!);
+    if (!_isTestMode) {
+      await _storage.savePathHistory(contactPubKeyHex, _cache[contactPubKeyHex]!);
+    }
     _version++;
     notifyListeners();
   }
@@ -571,7 +582,9 @@ class PathHistoryService extends ChangeNotifier {
     _cacheAccessOrder.clear();
     _autoRotationIndex.clear();
     _floodStats.clear();
-    _storage.clearAllPathHistories();
+    if (!_isTestMode) {
+      _storage.clearAllPathHistories();
+    }
     _version = 0;
     notifyListeners();
   }

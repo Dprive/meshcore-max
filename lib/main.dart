@@ -22,6 +22,7 @@ import 'services/chat_text_scale_service.dart';
 import 'services/translation_service.dart';
 import 'services/ui_view_state_service.dart';
 import 'services/timeout_prediction_service.dart';
+import 'services/topology_service.dart';
 import 'storage/prefs_manager.dart';
 import 'utils/app_logger.dart';
 
@@ -35,6 +36,7 @@ void main() async {
   final storage = StorageService();
   final connector = MeshCoreConnector();
   final pathHistoryService = PathHistoryService(storage);
+  final topologyService = TopologyService(pathHistoryService);
   final retryService = MessageRetryService();
   final appSettingsService = AppSettingsService();
   final bleDebugLogService = BleDebugLogService();
@@ -100,6 +102,7 @@ void main() async {
       translationService: translationService,
       uiViewStateService: uiViewStateService,
       timeoutPredictionService: timeoutPredictionService,
+      topologyService: topologyService,
     ),
   );
 }
@@ -138,6 +141,7 @@ class MeshCoreApp extends StatelessWidget {
   final TranslationService translationService;
   final UiViewStateService uiViewStateService;
   final TimeoutPredictionService timeoutPredictionService;
+  final TopologyService topologyService;
 
   const MeshCoreApp({
     super.key,
@@ -153,6 +157,7 @@ class MeshCoreApp extends StatelessWidget {
     required this.translationService,
     required this.uiViewStateService,
     required this.timeoutPredictionService,
+    required this.topologyService,
   });
 
   @override
@@ -162,6 +167,7 @@ class MeshCoreApp extends StatelessWidget {
         ChangeNotifierProvider.value(value: connector),
         ChangeNotifierProvider.value(value: retryService),
         ChangeNotifierProvider.value(value: pathHistoryService),
+        ChangeNotifierProvider.value(value: topologyService),
         ChangeNotifierProvider.value(value: appSettingsService),
         ChangeNotifierProvider.value(value: bleDebugLogService),
         ChangeNotifierProvider.value(value: appDebugLogService),

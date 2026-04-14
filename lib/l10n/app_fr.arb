@@ -622,6 +622,8 @@
     }
   },
   "chat_invalidLink": "Format de lien invalide",
+  "map_manualNodeEntryHint": "Entrez l'indicatif ou le préfixe hex",
+  "map_addNode": "Ajouter le nœud",
   "map_title": "Carte des nœuds",
   "map_noNodesWithLocation": "Aucun nœud avec des données de localisation",
   "map_nodesNeedGps": "Les nœuds doivent partager leurs coordonnées GPS\npour apparaître sur la carte.",

@@ -141,6 +141,20 @@ class _ScannerScreenState extends State<ScannerScreen> {
                   if (usbSupported)
                     FloatingActionButton.extended(
                       onPressed: () {
+                        final connector = context.read<MeshCoreConnector>();
+                        connector.enableTestMode();
+                        Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => const ContactsScreen()),
+                        );
+                      },
+                      heroTag: 'scanner_simulator_action',
+                      icon: const Icon(Icons.science),
+                      label: const Text("Simulator"),
+                    ),
+                  if (usbSupported) const SizedBox(width: 12),
+                  if (usbSupported)
+                    FloatingActionButton.extended(
+                      onPressed: () {
                         appLogger.info(
                           'USB selected, opening UsbScreen',
                           tag: 'ScannerScreen',
