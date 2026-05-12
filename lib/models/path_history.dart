@@ -7,6 +7,7 @@ class PathRecord {
   final int successCount;
   final int failureCount;
   final double routeWeight;
+  final bool isOutbound;
 
   PathRecord({
     required this.hopCount,
@@ -17,6 +18,7 @@ class PathRecord {
     required this.successCount,
     required this.failureCount,
     this.routeWeight = 1.0,
+    required this.isOutbound,
   });
 
   String get displayText =>
@@ -32,6 +34,7 @@ class PathRecord {
       'success_count': successCount,
       'failure_count': failureCount,
       'route_weight': routeWeight,
+      'is_outbound': isOutbound,
     };
   }
 
@@ -48,6 +51,7 @@ class PathRecord {
       successCount: json['success_count'] as int? ?? 0,
       failureCount: json['failure_count'] as int? ?? 0,
       routeWeight: (json['route_weight'] as num?)?.toDouble() ?? 1.0,
+      isOutbound: json['is_outbound'] as bool? ?? false,
     );
   }
 }

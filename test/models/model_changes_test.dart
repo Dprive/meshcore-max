@@ -192,6 +192,7 @@ void main() {
         pathBytes: [0x01, 0x02],
         successCount: 1,
         failureCount: 0,
+        isOutbound: false,
       );
       expect(record.routeWeight, equals(1.0));
     });
@@ -206,6 +207,7 @@ void main() {
         successCount: 5,
         failureCount: 2,
         routeWeight: 3.5,
+        isOutbound: false,
       );
       expect(record.routeWeight, equals(3.5));
     });
@@ -220,6 +222,7 @@ void main() {
         successCount: 0,
         failureCount: 0,
         routeWeight: 2.25,
+        isOutbound: false,
       );
       final json = record.toJson();
       expect(json.containsKey('route_weight'), isTrue);

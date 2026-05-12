@@ -340,6 +340,7 @@ class PathHistoryService extends ChangeNotifier {
       successCount: successCount,
       failureCount: failureCount,
       routeWeight: routeWeight,
+      isOutbound: existing?.isOutbound ?? false,
     );
 
     final updatedPaths = List<PathRecord>.from(history.recentPaths);

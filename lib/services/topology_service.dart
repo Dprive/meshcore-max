@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import '../models/contact.dart';
@@ -91,54 +92,118 @@ class TopologyService extends ChangeNotifier {
 
     // 2. Add all contacts as nodes
     for (var contact in allContacts) {
-      if (contact.publicKey.isEmpty) continue;
-      final hash = contact.publicKey[0];
-      
-      // If we already have a node (e.g. Me), don't overwrite if it's Me
-      if (_nodes.containsKey(hash) && _nodes[hash]!.isMe) continue;
+    final paths = _pathHistoryService.getRecentPaths(contact.publicKeyHex);
+    if (paths.isEmpty) continue;
 
-      _nodes[hash] = TopologyNode(
-        hash: hash,
-        name: contact.name,
-        type: contact.type,
-      );
+    final contactHash = contact.publicKey.isNotEmpty ? contact.publicKey.first : 0;
+
+    for (var path in paths) {
+      // RÈGLE : Ignorer les chemins incomplets (hopCount > 1 mais pas de pathBytes)
+      if (path.hopCount > 1 && path.pathBytes.isEmpty) {
+        continue; 
+      }
+
+      if (path.isOutbound) {
+        // Me -> Relais -> Contact
+        int prev = myHash;
+        for (var relay in path.pathBytes) {
+          _addEdge(prev, relay, path.successCount, path.failureCount, path.timestamp ?? DateTime.now());
+          prev = relay;
+        }
+        _addEdge(prev, contactHash, path.successCount, path.failureCount, path.timestamp ?? DateTime.now());
+      } else {
+        // Contact -> Relais -> Me
+        int prev = contactHash;
+        for (var relay in path.pathBytes) {
+          _addEdge(prev, relay, path.successCount, path.failureCount, path.timestamp ?? DateTime.now());
+          prev = relay;
+        }
+        _addEdge(prev, myHash, path.successCount, path.failureCount, path.timestamp ?? DateTime.now());
+      }
+    }
+  }
+  notifyListeners();
+}
+  void clearGraph() {
+    _graph.clear();
+    _nodes.clear();
+    notifyListeners();
+  }
+
+  void addGraphFromApi(Map<String, dynamic> apiData) {
+    final nodeData = apiData['node'];
+    if (nodeData == null) {
+      notifyListeners();
+      return;
     }
 
-    // 3. Build edges from path history
-    for (var contact in allContacts) {
-      final paths = _pathHistoryService.getRecentPaths(contact.publicKeyHex);
-      if (paths.isEmpty) continue;
+    final centralPubKey = nodeData['public_key'] as String;
+    final centralHash = _getHashFromHex(centralPubKey);
+    final centralName = nodeData['name'] as String? ?? "Central Node";
+    
+    _nodes[centralHash] = TopologyNode(
+      hash: centralHash,
+      name: centralName,
+      type: advTypeRepeater, 
+      isMe: false,
+    );
 
-      final contactHash = contact.publicKey.isNotEmpty ? contact.publicKey.first : 0;
+    final recentAdverts = apiData['recentAdverts'] as List<dynamic>? ?? [];
 
-      for (var path in paths) {
-        if (path.pathBytes.isEmpty) {
-          // Direct connection to Me (if path is empty, it's 1 hop to Me)
-          _addEdge(contactHash, myHash, path.successCount, path.failureCount,
-              path.timestamp ?? DateTime.now());
-          _addEdge(myHash, contactHash, path.successCount, path.failureCount,
-              path.timestamp ?? DateTime.now());
-          continue;
+    for (var advert in recentAdverts) {
+      final observations = advert['observations'] as List<dynamic>? ?? [];
+      for (var obs in observations) {
+        final observerIdHex = obs['observer_id'] as String? ?? "";
+        final observerName = obs['observer_name'] as String? ?? "Unknown Gateway";
+        final observerHash = _getHashFromHex(observerIdHex);
+        
+        if (observerIdHex.isNotEmpty) {
+           _nodes[observerHash] = TopologyNode(
+             hash: observerHash,
+             name: observerName,
+             type: advTypeRepeater, 
+             isMe: false,
+           );
         }
 
-        // The structure is Contact -> Relay1 -> Relay2 -> Me.
-        int prevHash = contactHash;
-        for (int i = 0; i < path.pathBytes.length; i++) {
-          int currentHash = path.pathBytes[i];
-          _addEdge(prevHash, currentHash, path.successCount, path.failureCount,
-              path.timestamp ?? DateTime.now());
-          _addEdge(currentHash, prevHash, path.successCount, path.failureCount,
-              path.timestamp ?? DateTime.now()); // Bidirectional
-          prevHash = currentHash;
+        final pathJsonStr = obs['path_json'] as String? ?? "[]";
+        List<dynamic> pathHashesStrs = [];
+        try {
+          pathHashesStrs = jsonDecode(pathJsonStr);
+        } catch (_) {}
+
+        final pathHashes = pathHashesStrs.map((s) => _getHashFromHex(s.toString())).toList();
+        final snr = (obs['snr'] as num?)?.toDouble();
+        final timestampStr = obs['timestamp'] as String?;
+        final timestamp = timestampStr != null ? DateTime.tryParse(timestampStr) ?? DateTime.now() : DateTime.now();
+
+        int prev = centralHash;
+        for (var relayHash in pathHashes) {
+           if (!_nodes.containsKey(relayHash)) {
+              _nodes[relayHash] = TopologyNode(
+                 hash: relayHash,
+                 name: "Relay ${relayHash.toRadixString(16).padLeft(2, '0').toUpperCase()}",
+                 type: advTypeRepeater,
+              );
+           }
+           _addEdge(prev, relayHash, 1, 0, timestamp, snr: null);
+           _addEdge(relayHash, prev, 1, 0, timestamp, snr: null);
+           prev = relayHash;
         }
-        // Link last relay to Me
-        _addEdge(prevHash, myHash, path.successCount, path.failureCount,
-            path.timestamp ?? DateTime.now());
-        _addEdge(myHash, prevHash, path.successCount, path.failureCount,
-            path.timestamp ?? DateTime.now()); // Bidirectional
+
+        if (observerHash != 0) {
+           _addEdge(prev, observerHash, 1, 0, timestamp, snr: snr);
+           _addEdge(observerHash, prev, 1, 0, timestamp, snr: snr);
+        }
       }
     }
     notifyListeners();
+  }
+
+  int _getHashFromHex(String hexStr) {
+    if (hexStr.isEmpty) return 0;
+    final str = hexStr.length >= 2 ? hexStr.substring(0, 2) : hexStr;
+    return int.tryParse(str, radix: 16) ?? 0;
   }
 
   void _addEdge(
@@ -266,7 +331,18 @@ class TopologyService extends ChangeNotifier {
       return b.stabilityScore.compareTo(a.stabilityScore);
     });
 
-    return results;
+    // Limit to 3 paths maximum per hop count to avoid UI clutter
+    final Map<int, int> hopCountFreq = {};
+    final List<RoutePath> filteredResults = [];
+    for (var path in results) {
+      final count = hopCountFreq[path.hopCount] ?? 0;
+      if (count < 3) {
+        filteredResults.add(path);
+        hopCountFreq[path.hopCount] = count + 1;
+      }
+    }
+
+    return filteredResults;
   }
 
   double _calculateStabilityScore(List<int> path) {

@@ -3,11 +3,13 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'dart:math' as math;
-import '../models/contact.dart';
+
 import '../services/topology_service.dart';
 import '../connector/meshcore_connector.dart';
 import '../connector/meshcore_protocol.dart';
 import '../storage/prefs_manager.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import '../widgets/interactive_physics_graph.dart';
 import '../utils/app_logger.dart';
 
@@ -20,17 +22,19 @@ class TopologyScreen extends StatefulWidget {
 
 class _TopologyScreenState extends State<TopologyScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  Contact? _selectedFrom;
-  Contact? _selectedTo;
+  TopologyNode? _selectedFrom;
+  TopologyNode? _selectedTo;
   List<RoutePath> _foundPaths = [];
   bool _isLoading = false;
   int? _testingPathIndex; 
   StreamSubscription<Uint8List>? _frameSubscription;
   Timer? _timeoutTimer;
   Uint8List _currentTag = Uint8List(4);
-  RoutePath? _lastTestedPath;
+  List<int>? _lastTestedRoundTrip;
   double _minReliability = 0.0;
   bool _showOnlyRepeaters = true;
+  bool _isPinging = false;
+  Completer<List<double>?>? _pingCompleter;
 
   @override
   void initState() {
@@ -81,7 +85,10 @@ class _TopologyScreenState extends State<TopologyScreen> with SingleTickerProvid
           final tag = reader.readBytes(4);
           if (listEquals(tag, _currentTag)) {
             _timeoutTimer?.cancel();
-            _handleTraceResponse(frame, _lastTestedPath);
+            final snrData = _parseTraceResponse(frame, _lastTestedRoundTrip);
+            if (_pingCompleter?.isCompleted == false) {
+              _pingCompleter?.complete(snrData);
+            }
           }
         }
       } catch (e) {
@@ -90,8 +97,8 @@ class _TopologyScreenState extends State<TopologyScreen> with SingleTickerProvid
     });
   }
 
-  void _handleTraceResponse(Uint8List frame, RoutePath? lastPath) {
-    if (lastPath == null) return;
+  List<double>? _parseTraceResponse(Uint8List frame, List<int>? fullPathHashes) {
+    if (fullPathHashes == null) return null;
     
     final buffer = BufferReader(frame);
     try {
@@ -107,107 +114,94 @@ class _TopologyScreenState extends State<TopologyScreen> with SingleTickerProvid
 
       if (snrData.isNotEmpty) {
         final topologyService = context.read<TopologyService>();
-        // Map SNR back to edges
-        // lastPath.pathHashes includes [Me, R1, R2, ..., Destination]
-        // If symmetric, lastPath.pathHashes remains the original forward path, 
-        // but snrData contains extra hops.
-        
-        final forwardHops = lastPath.pathHashes;
-        for (int i = 0; i < snrData.length; i++) {
-          if (i < forwardHops.length - 1) {
-            // Forward leg
-            final from = forwardHops[i];
-            final to = forwardHops[i+1];
-            topologyService.updateEdgeSnr(from, to, snrData[i]);
-          } else {
-            // Return leg (if symmetric path was used)
-            // snrData[forwardHops.length - 1] is Target -> Rn
-            // i-th SNR corresponds to return leg index (i - (forwardHops.length - 1))
-            final returnIndex = i - (forwardHops.length - 1);
-            if (returnIndex < forwardHops.length - 1) {
-               // forwardHops: [Me, R1, Dest] (len 3, offset 2)
-               // snrData: [Me->R1, R1->Dest, Dest->R1, R1->Me] (len 4)
-               // i=2 -> returnIndex=0 -> Dest->R1
-               // i=3 -> returnIndex=1 -> R1->Me
-               final from = forwardHops[forwardHops.length - 1 - returnIndex];
-               final to = forwardHops[forwardHops.length - 2 - returnIndex];
-               topologyService.updateEdgeSnr(from, to, snrData[i]);
-            }
-          }
+        final hops = fullPathHashes;
+        for (int i = 0; i < snrData.length && i < hops.length - 1; i++) {
+          final from = hops[i];
+          final to = hops[i+1];
+          topologyService.updateEdgeSnr(from, to, snrData[i]);
         }
       }
+      return snrData;
+    } catch (e) {
+      appLogger.error("Error parsing trace response in TopologyScreen: $e");
+      return null;
+    }
+  }
 
+  List<int> _calculateRoundTripHashes(List<int> forwardPathHashes, int targetType) {
+    if (forwardPathHashes.length < 2) return List<int>.from(forwardPathHashes);
+
+    final topologyService = context.read<TopologyService>();
+    final targetHash = forwardPathHashes.last;
+    final sourceHash = forwardPathHashes.first;
+
+    final returnPaths = topologyService.findPaths(targetHash, sourceHash, maxHops: 7, onlyRepeaters: _showOnlyRepeaters);
+    
+    List<int> returnLeg = [];
+    if (returnPaths.isNotEmpty) {
+      returnLeg = List<int>.from(returnPaths.first.pathHashes);
+      if (returnLeg.isNotEmpty) returnLeg.removeAt(0); 
+    } else {
+      returnLeg = List<int>.from(forwardPathHashes.reversed);
+      if (returnLeg.isNotEmpty) returnLeg.removeAt(0); 
+    }
+
+    return List<int>.from(forwardPathHashes)..addAll(returnLeg);
+  }
+
+  Uint8List _buildTracePayload(List<int> fullPathHashes) {
+    final relays = List<int>.from(fullPathHashes);
+    if (_selectedFrom?.isMe == true) {
+      if (relays.isNotEmpty) {
+        final sourceHash = relays.first;
+        relays.removeAt(0);
+        if (relays.isNotEmpty && relays.last == sourceHash) relays.removeLast();
+      }
+    }
+    return Uint8List.fromList(relays);
+  }
+
+  void _loadTopology() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    final topologyService = context.read<TopologyService>();
+    final connector = context.read<MeshCoreConnector>();
+    
+    topologyService.clearGraph();
+
+    final repeaterIds = <String>{};
+    repeaterIds.add('3410914e5f1660bf08b015126574dbc8bed381615de8699d2b7861c474d18bdf'); // Saint Lazare
+
+    for (final contact in connector.allContactsUnfiltered) {
+      if (contact.type == advTypeRepeater) {
+        repeaterIds.add(contact.publicKeyHex);
+      }
+    }
+
+    try {
+      await Future.wait(repeaterIds.map((id) async {
+        try {
+          final response = await http.get(Uri.parse('https://analyzer.meshcore.paris/api/nodes/$id'));
+          if (response.statusCode == 200) {
+            final data = jsonDecode(response.body);
+            if (!mounted) return;
+            topologyService.addGraphFromApi(data);
+          }
+        } catch (e) {
+          appLogger.error("Failed to fetch topology for $id: $e");
+        }
+      }));
+    } catch (e) {
+      appLogger.error("Failed to fetch topology: $e");
+    } finally {
       if (mounted) {
         setState(() {
-          _testingPathIndex = null;
+          _isLoading = false;
         });
-        
-        final avgSnr = snrData.isNotEmpty 
-            ? snrData.reduce((a, b) => a + b) / snrData.length 
-            : 0.0;
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Test réussi ! SNR moyen: ${avgSnr.toStringAsFixed(1)} dB (${snrData.length} sauts)'),
-            backgroundColor: Colors.blue.shade700,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
       }
-    } catch (e) {
-      appLogger.error("Error handling trace response in TopologyScreen: $e");
-      if (mounted) setState(() => _testingPathIndex = null);
     }
-  }
-
-  Uint8List _buildSymmetricPath(List<int> pathHashes, int targetType) {
-    if (pathHashes.length < 2) return Uint8List.fromList(pathHashes);
-
-    // pathHashes includes [Me, R1, ..., Target]
-    // We want the trace to go [R1, ..., Target, ..., R1]
-    final relays = List<int>.from(pathHashes);
-    relays.removeAt(0); // Remove Me
-
-    if (relays.isEmpty) return Uint8List(0);
-
-    final target = relays.last;
-    final intermediateRelays = relays.sublist(0, relays.length - 1);
-
-    int totalLen;
-    if (targetType == advTypeRepeater || targetType == advTypeRoom) {
-      // Repeaters are usually the endpoint of the trace themselves
-      // Path: [R1, ..., Rn, Target, Rn, ..., R1]
-      totalLen = intermediateRelays.length * 2 + 1;
-      final result = Uint8List(totalLen);
-      for (int i = 0; i < intermediateRelays.length; i++) {
-        result[i] = intermediateRelays[i];
-        result[totalLen - 1 - i] = intermediateRelays[i];
-      }
-      result[intermediateRelays.length] = target;
-      return result;
-    } else {
-      // Chat nodes: we trace to their last hop and back
-      // Path: [R1, ..., Rn, Target, Rn, ..., R1] ??
-      // Actually, if we want a full round trip to the target, it depends on if the target repeats.
-      // Assuming symmetric behavior:
-      totalLen = relays.length + intermediateRelays.length;
-      final result = Uint8List(totalLen);
-      for (int i = 0; i < relays.length; i++) {
-        result[i] = relays[i];
-      }
-      for (int i = 0; i < intermediateRelays.length; i++) {
-        result[totalLen - 1 - i] = intermediateRelays[i];
-      }
-      return result;
-    }
-  }
-
-  void _loadTopology() {
-    final connector = context.read<MeshCoreConnector>();
-    final topologyService = context.read<TopologyService>();
-    final myKey = connector.selfPublicKeyHex;
-    topologyService.applyDecay(); // Background aging
-    topologyService.buildGraph(connector.allContactsUnfiltered, myKey);
   }
 
   void _calculateRoutes() {
@@ -217,8 +211,8 @@ class _TopologyScreenState extends State<TopologyScreen> with SingleTickerProvid
     });
 
     final topologyService = context.read<TopologyService>();
-    final fromHash = _selectedFrom!.publicKey.first;
-    final toHash = _selectedTo!.publicKey.first;
+    final fromHash = _selectedFrom!.hash;
+    final toHash = _selectedTo!.hash;
 
     final paths = topologyService.findPaths(fromHash, toHash,
         maxHops: 7, onlyRepeaters: _showOnlyRepeaters);
@@ -230,23 +224,27 @@ class _TopologyScreenState extends State<TopologyScreen> with SingleTickerProvid
   }
 
   Future<void> _testRoute(int index, RoutePath path) async {
+    if (_isPinging) return;
     setState(() {
       _testingPathIndex = index;
+      _isPinging = true;
     });
 
     if (PrefsManager.isTestModeGlobal) {
-      // Simulate a round-trip ping based on hop count
       final simulatedMs = path.hopCount * 60 + math.Random().nextInt(80);
       await Future.delayed(Duration(milliseconds: 400 + simulatedMs));
       if (!mounted) return;
-      setState(() => _testingPathIndex = null);
+      setState(() {
+        _testingPathIndex = null;
+        _isPinging = false;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Row(
             children: [
               const Icon(Icons.check_circle, color: Colors.greenAccent),
               const SizedBox(width: 8),
-              Text('Ping réussi en ${simulatedMs}ms via ${path.hopCount} saut(s)'),
+              Text('Ping simulé réussi en ${simulatedMs}ms via ${path.hopCount} saut(s)'),
             ],
           ),
           backgroundColor: Colors.green.shade800,
@@ -254,36 +252,74 @@ class _TopologyScreenState extends State<TopologyScreen> with SingleTickerProvid
         ),
       );
     } else {
-      // Real mode: send a trace request
       if (_frameSubscription == null) _setupFrameListener();
 
       final connector = context.read<MeshCoreConnector>();
-      
-      // Convert RoutePath to Uint8List path (excluding Me/Source if protocol expects only relays)
-      // Actually buildTraceReq takes the full path from Me to Dest.
-      // In path_trace_map.dart, they use buildTraceReq with a path.
-      
-      // We need to exclude the first hash (Me) from the path sent in the trace request 
-      // because the mesh protocol usually expects the destination-bound relays.
-      // Let's check how buildTraceReq is used.
-      
-      final tracePathValues = _buildSymmetricPath(path.pathHashes, _selectedTo?.type ?? 1);
+      final fullRoundTripHashes = _calculateRoundTripHashes(path.pathHashes, _selectedTo?.type ?? 1);
+      final tracePathValues = _buildTracePayload(fullRoundTripHashes);
 
-      final tagInt = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-      final tagBytes = Uint8List(4)..buffer.asByteData().setUint32(0, tagInt, Endian.little);
-      _currentTag = tagBytes;
+      int successes = 0;
+      List<double> allSnrs = [];
 
-      final frame = buildTraceReq(
-        tagInt,
-        0, // auth
-        0, // flag
-        payload: tracePathValues,
-      );
-      
-      connector.sendFrame(frame);
-      _lastTestedPath = path;
-      
-      // The rest is handled by _frameSubscription
+      for (int i = 0; i < 3; i++) {
+        if (!mounted) break;
+
+        final tagInt = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+        final tagBytes = Uint8List(4)..buffer.asByteData().setUint32(0, tagInt, Endian.little);
+        _currentTag = tagBytes;
+
+        final frame = buildTraceReq(
+          tagInt,
+          0,
+          0,
+          payload: tracePathValues,
+        );
+
+        _pingCompleter = Completer<List<double>?>();
+        _lastTestedRoundTrip = fullRoundTripHashes;
+
+        connector.sendFrame(frame);
+
+        _timeoutTimer?.cancel();
+        _timeoutTimer = Timer(const Duration(seconds: 15), () {
+          if (_pingCompleter?.isCompleted == false) {
+             _pingCompleter?.complete(null);
+          }
+        });
+
+        final snrData = await _pingCompleter!.future;
+        if (snrData != null) {
+           successes++;
+           allSnrs.addAll(snrData);
+        }
+
+        if (i < 2 && mounted) {
+           await Future.delayed(const Duration(seconds: 1));
+        }
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _testingPathIndex = null;
+        _isPinging = false;
+      });
+
+      if (successes > 0) {
+        final avgSnr = allSnrs.isNotEmpty 
+            ? allSnrs.reduce((a, b) => a + b) / allSnrs.length 
+            : 0.0;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Test de route : $successes/3 paquets reçus. SNR moyen: ${avgSnr.toStringAsFixed(1)} dB'),
+            backgroundColor: Colors.blue.shade700,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Test de route échoué (Timeout 3/3)")),
+        );
+      }
     }
   }
   
@@ -363,27 +399,8 @@ class _TopologyScreenState extends State<TopologyScreen> with SingleTickerProvid
   }
 
   Widget _buildRoutingTab() {
-    final connector = context.read<MeshCoreConnector>();
-    final List<Contact> contacts = List.from(connector.allContactsUnfiltered);
-    
-    // Add "Me" to contacts list if not present
-    final myPk = connector.selfPublicKey;
-    if (myPk != null && myPk.isNotEmpty) {
-      final me = Contact(
-        name: "Me (Moi)",
-        publicKey: myPk,
-        type: advTypeChat,
-        pathLength: 0,
-        path: Uint8List(0),
-        lastSeen: DateTime.now(),
-        latitude: connector.selfLatitude,
-        longitude: connector.selfLongitude,
-      );
-      // Check if already in list (unlikely for My PK)
-      if (!contacts.any((c) => listEquals(c.publicKey, myPk))) {
-        contacts.insert(0, me);
-      }
-    }
+    final topologyService = context.read<TopologyService>();
+    final List<TopologyNode> nodes = topologyService.nodes.values.toList();
     
     return Column(
       children: [
@@ -392,26 +409,26 @@ class _TopologyScreenState extends State<TopologyScreen> with SingleTickerProvid
           child: Row(
             children: [
               Expanded(
-                child: DropdownButton<Contact>(
+                child: DropdownButton<TopologyNode>(
                   hint: const Text("Source"),
                   value: _selectedFrom,
                   isExpanded: true,
-                  items: contacts.map((c) => DropdownMenuItem(value: c, child: Text(c.name))).toList(),
-                  onChanged: (c) {
-                    setState(() => _selectedFrom = c);
+                  items: nodes.map((n) => DropdownMenuItem(value: n, child: Text(n.name))).toList(),
+                  onChanged: (n) {
+                    setState(() => _selectedFrom = n);
                     _calculateRoutes();
                   },
                 ),
               ),
               const SizedBox(width: 16),
               Expanded(
-                child: DropdownButton<Contact>(
+                child: DropdownButton<TopologyNode>(
                   hint: const Text("Destination"),
                   value: _selectedTo,
                   isExpanded: true,
-                  items: contacts.map((c) => DropdownMenuItem(value: c, child: Text(c.name))).toList(),
-                  onChanged: (c) {
-                    setState(() => _selectedTo = c);
+                  items: nodes.map((n) => DropdownMenuItem(value: n, child: Text(n.name))).toList(),
+                  onChanged: (n) {
+                    setState(() => _selectedTo = n);
                     _calculateRoutes();
                   },
                 ),
@@ -447,9 +464,9 @@ class _TopologyScreenState extends State<TopologyScreen> with SingleTickerProvid
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : FilledButton.tonalIcon(
-                          onPressed: _testingPathIndex == null
-                              ? () => _testRoute(index, path)
-                              : null,
+                          onPressed: _isPinging
+                              ? null
+                              : () => _testRoute(index, path),
                           icon: const Icon(Icons.flash_on, size: 16),
                           label: const Text('Tester'),
                         ),

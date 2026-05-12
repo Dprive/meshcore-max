@@ -380,6 +380,7 @@ void main() {
             successCount: 1,
             failureCount: 0,
             routeWeight: 1.0,
+            isOutbound: false,
           ),
           PathRecord(
             hopCount: 1,
@@ -390,6 +391,7 @@ void main() {
             successCount: 1,
             failureCount: 0,
             routeWeight: 1.0,
+            isOutbound: false,
           ),
         ],
       );
@@ -423,6 +425,7 @@ void main() {
               successCount: 1,
               failureCount: 0,
               routeWeight: 4.0,
+              isOutbound: false,
             ),
             PathRecord(
               hopCount: 1,
@@ -433,6 +436,7 @@ void main() {
               successCount: 1,
               failureCount: 0,
               routeWeight: 1.0,
+              isOutbound: false,
             ),
           ],
         );
